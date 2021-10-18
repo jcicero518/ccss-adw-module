@@ -24,4 +24,7 @@ The end result: https://socialsciences.cornell.edu/affiliates
 * JS is "transpiled" into ES5 by Webpack, most of which is abstracted away in this case with the **Laravel Mix** library. It looks at _webpack.mix.js_ for configuration.
 
 
+* Filter dropdowns on the site are updated automatically based on what fields have been chosen by each user, making it simple to maintain.
+
+
 * Uses React's built in data store. The "time machine" functionality that is possible with Redux is most likely overkill here unless it needs to scale beyond the one dedicated page.
