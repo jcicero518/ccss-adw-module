@@ -1,0 +1,11 @@
+profile-components:
+  js:
+    //polyfill.io/v3/polyfill.min.js?version=3.52.1&features=blissfuljs%2CArray.prototype.flat%2CArray.prototype.flatMap%2CArray.prototype.includes%2CElement.prototype.scrollIntoView&flags=gated: { preprocess: false }
+    js/dist/manifest.js: { preprocess: false }
+    js/dist/vendor.js: { preprocess: false }
+    js/dist/index.js: { preprocess: false }
+  css:
+    component:
+      css/dist/main.css: {}
+  dependencies:
+    - core/drupal

@@ -1,0 +1,306 @@
+<?php
+
+use Drupal\Core\Access\AccessResult;
+use Drupal\Core\Access\AccessResultForbidden;
+use Drupal\Core\Entity\EntityTypeInterface;
+use Drupal\Core\Entity\FieldableEntityInterface;
+use Drupal\Core\Field\BaseFieldDefinition;
+use Drupal\Core\Field\FieldDefinitionInterface;
+use Drupal\Core\Field\FieldItemListInterface;
+use Drupal\Core\Field\FieldStorageDefinitionInterface;
+use Drupal\Core\Session\AccountInterface;
+use Drupal\field\Entity\FieldStorageConfig;
+use Drupal\Core\Entity\ContentEntityInterface;
+use Drupal\Core\Config\ConfigFactoryInterface;
+use Drupal\Core\Config\Config;
+use Drupal\views\Plugin\views\query\QueryPluginBase;
+use Drupal\views\ViewExecutable;
+
+/**
+ * Implements hook_preprocess_HOOK().
+ *
+ * @param $variables
+ * @throws \Drupal\Component\Plugin\Exception\InvalidPluginDefinitionException
+ * @throws \Drupal\Component\Plugin\Exception\PluginNotFoundException
+ */
+function adw_user_profiles_preprocess_paragraph__affiliate_content(&$variables) {
+  /**
+   * React mount point
+   */
+  $variables['content']['#markup'] = '<div id="affiliates_section_main"></div>';
+
+  $variables['content']['#attached'] = [
+    'library' => 'adw_user_profiles/profile-components'
+  ];
+
+  $colleges = [];
+  $collegeNodesArray = Drupal::entityTypeManager()->getStorage('node')
+    ->loadByProperties(['type' => 'colleges']);
+
+  if (!empty($collegeNodesArray)) {
+    $colleges = array_map(static function($college) {
+      $nodeTitle = '';
+      if ($college instanceof \Drupal\node\Entity\Node) {
+        $nodeTitle = $college->getTitle();
+      }
+      return $nodeTitle;
+    }, $collegeNodesArray);
+  }
+
+  $variables['content']['#attached']['drupalSettings'] = [
+    'position' => adw_user_profiles_get_profile_config('field_position'),
+    'departments' => adw_user_profiles_get_profile_config('field_department'),
+    'graduate_fields' => adw_user_profiles_get_profile_config('field_graduate_fields', TRUE),
+    'center_affiliations' => adw_user_profiles_get_profile_config('field_center_affiliations', TRUE),
+    'research_approaches' => adw_user_profiles_get_profile_config('field_research_approaches', TRUE),
+    'research_interests' => adw_user_profiles_get_profile_config('field_research_interests', TRUE),
+    'colleges' => $colleges,
+    'pets' => adw_user_profiles_get_profile_config('field_pets'),
+    'coffee_or_tea' => adw_user_profiles_get_profile_config('field_coffee_or_tea'),
+    'tattoos' => adw_user_profiles_get_profile_config('field_any_tattoos')
+  ];
+}
+
+/**
+ * Implements hook_entity_field_access().
+ *
+ * Restrict access for Account Status field to specific roles
+ *
+ * @param $operation
+ * @param FieldDefinitionInterface $field_definition
+ * @param AccountInterface $account
+ * @param FieldItemListInterface|NULL $items
+ * @return AccessResultForbidden|\Drupal\Core\Access\AccessResultNeutral
+ */
+function adw_user_profiles_entity_field_access($operation, FieldDefinitionInterface $field_definition, AccountInterface $account, FieldItemListInterface $items = NULL) {
+  $result = AccessResult::neutral();
+  if ($field_definition->getName() === 'field_account_status') {
+
+    $allowedRoles = [
+      'client_admin',
+      'administrator'
+    ];
+
+    if ($operation === 'edit' && empty(array_intersect($allowedRoles, $account->getRoles()))) {
+      $result = AccessResult::forbidden();
+    }
+  }
+
+  return $result->addCacheContexts(['user.roles:administrator', 'user.roles:client_admin']);
+}
+
+/**
+ * Implements hook_views_query_alter().
+ */
+function adw_user_profiles_views_query_alter(ViewExecutable $view, QueryPluginBase $query) {
+  if ($view->id() === 'users') {
+    $query->distinct = TRUE;
+    $view->display_handler->setOption('distinct', TRUE);
+  }
+}
+
+/**
+ * Implements hook_views_pre_render().
+ *
+ * Manipulate rendering of JSON export if needed
+ */
+function adw_user_profiles_views_pre_render(ViewExecutable $view) {
+  if ($view->id() === 'users' && $view->current_display === 'rest_export_4') {}
+}
+
+/**
+ * Implements hook_views_pre_view().
+ *
+ * Programmatically force DISTINCT query for this view
+ */
+function adw_user_profiles_views_pre_view(ViewExecutable $view, $display_id, array &$args) {
+  if ($view->id() === 'users') {
+    $view->display_handler->setOption('distinct', TRUE);
+  }
+}
+
+/**
+ * Helper function - is passed the field name of an affiliate profile field then
+ * loads the config storage "allowed values"
+ *
+ * @param $profileFieldName
+ * @param bool $valueSort
+ * @return mixed|null
+ */
+function adw_user_profiles_get_profile_config($profileFieldName, $valueSort = FALSE) {
+  $storage = FieldStorageConfig::loadByName('profile', $profileFieldName);
+  /**
+   * Get allowed values as is
+   */
+  $allowed = $storage->getSetting('allowed_values');
+  /**
+   * Sort some fields by array value to maintain alpha order
+   */
+  if ($valueSort) {
+    asort($allowed);
+  }
+  return $allowed;
+}
+
+/**
+ * Helper function
+ *
+ * @param $configField
+ * @return array
+ */
+function adw_user_profiles_get_config($configField) {
+  $options = [];
+
+  $configFactory = Drupal::configFactory()->get('adw_user_profiles.userprofileconfig');
+  $optionsString = $configFactory->get($configField);
+
+  $rows = explode(PHP_EOL, $optionsString);
+
+  if (!$optionsString) {
+    return [];
+  }
+
+  foreach ($rows as $key => $row) {
+    $line = explode('|', $row);
+    $options[$line[0]] = $line[1];
+  }
+
+  return $options;
+}
+
+/**
+ * Implements hook_mail().
+ */
+function adw_user_profiles_mail($key, &$message, $params) {
+  if ($key === 'affiliate_mail') {
+    $message['subject'] = 'Notification of affiliate';
+    $message['reply-to'] = $message['from'];
+    $message['body'] = $params['message'];
+  }
+}
+
+
+/**
+ * Profile pre-save. Checks who is editing the profile to determine whether it is
+ * the non-affiliate user filling out the form or an admin saving it.
+ *
+ * $entity param is of type Drupal\profile\Entity\Profile, the implemented
+ * ProfileInterface extends Drupal\Core\Entity\EntityInterface
+ *
+ * $entity->id() is null
+ * until the profile has been created - use ->getOwnerId() to retrieve the ID of the
+ * user that will be affiliated. If "new", send out email.
+ *
+ * TODO: Refactor the conditionals for less cognitive load.
+ *
+ * Implements hook_entity_presave().
+ *
+ * @param \Drupal\Core\Entity\EntityInterface $entity - Profile
+ * @throws \Drupal\Core\Entity\EntityStorageException
+ */
+function adw_user_profiles_entity_presave(Drupal\Core\Entity\EntityInterface $entity) {
+  $currentAccount = Drupal::currentUser();
+  $currentUserId = (int)$currentAccount->id();
+  $currentUserRoles = $currentAccount->getRoles();
+
+  $mailManager = Drupal::service('plugin.manager.mail');
+  $module = 'adw_user_profiles';
+
+  // $entity->original if add form
+  // then $entity->isNew() === true
+
+  // When saving a profile entity e.g. /user/x/affiliate
+  if ($entity->getEntityTypeId() === 'profile') {
+    $userBeingEdited = (int)$entity->getOwnerId(); // method is from extended EntityOwnerInterface
+
+    // user editing their own affiliate profile
+    if ($currentUserId === $userBeingEdited) {
+
+      // user has no affiliate profile yet
+      if ($entity->isNew()) {
+        $userName = $currentAccount->getAccountName();
+        $firstName = $entity->get('field_first_name')->value;
+        $lastName = $entity->get('field_last_name')->value;
+        $fullName = $firstName . ' ' . $lastName;
+        $userEmail = $currentAccount->getEmail();
+
+        $key = 'affiliate_mail';
+        $to = 'jcicero@yourworkshop.com, socialsciences@cornell.edu';
+
+        $params['message'] = ['User ' . $fullName . ' has signed up to be an affiliate'];
+        $langcode = $currentAccount->getPreferredLangcode();
+
+        $mailResult = $mailManager->mail($module, $key, $to, $langcode, $params, 'drupal@adworkshop.com');
+        if (!$mailResult) {
+          Drupal::logger('affiliate-mail')->error('Error sending email');
+        }
+      }
+
+    } else {
+      // Someone editing a different user's profile - to approve?
+      if (in_array('administrator', $currentUserRoles, TRUE)
+        || in_array('client_admin', $currentUserRoles, TRUE)) {
+
+        if ($entity->get('field_account_status')) {
+          // affiliate_status_inactive
+          // affiliate_status_confirmed
+          $workflow_status = $entity->get('field_account_status')->value;
+
+          $affiliateOwnerId = $entity->getOwnerId();
+          // TODO: Refactor to $entity->getOwner()
+          $affiliateProfileOwner = \Drupal\user\Entity\User::load($affiliateOwnerId);
+          if ($affiliateProfileOwner && ($affiliateProfileOwner instanceof \Drupal\user\Entity\User)) {
+
+            // sanity checks - profile owner is not an admin
+            if ($affiliateProfileOwner->hasRole('administrator')
+              || $affiliateProfileOwner->hasRole('client_admin')) {
+              return;
+            }
+
+            // workflow status
+            if ($workflow_status === 'affiliate_status_confirmed'
+              && (!$affiliateProfileOwner->hasRole('affiliate'))) {
+              $affiliateProfileOwner->addRole('affiliate');
+              $affiliateProfileOwner->save();
+
+              $key = 'affiliate_mail';
+              $to = 'jcicero@yourworkshop.com';
+              $params['message'] = ['User ' . $currentAccount->getAccountName() . ' approves affiliate status form for ' . $affiliateProfileOwner->getAccountName()];
+              $langcode = $currentAccount->getPreferredLangcode();
+
+              $mailResult = $mailManager->mail($module, $key, $to, $langcode, $params, 'drupal@adworkshop.com');
+              if (!$mailResult) {
+                Drupal::logger('affiliate-mail')->error('Error sending email');
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_form_alter().
+ */
+function adw_user_profiles_form_alter(&$form, \Drupal\Core\Form\FormStateInterface $form_state, $form_id) {
+  if ($form_id === 'profile_affiliate_add_form' || $form_id === 'profile_affiliate_edit_form') {
+
+    $form['other_info'] = [
+      '#type' => 'details',
+      '#title' => t('Note to affiliates'),
+      '#open' => TRUE,
+      '#attributes' => [
+        'class' => [
+          'form-wrapper',
+          'js-form-wrapper',
+        ]
+      ],
+      '#weight' => 9
+    ];
+    $form['other_info']['info'] = [
+      '#type' => '#item',
+      '#markup' => '<p><span class="fal fa-info-circle" aria-hidden="true"></span> If there is a category that you feel is missing, please use the Suggestion Box or email <a href="mailto:socialsciences@cornell.edu">socialsciences@cornell.edu</a> to request it to be added.</p>'
+    ];
+  }
+}

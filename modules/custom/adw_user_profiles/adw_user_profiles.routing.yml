@@ -1,0 +1,26 @@
+
+adw_user_profiles.adw_user_profile_config_form:
+  path: '/admin/config/adw_user_profiles/userprofileconfig'
+  defaults:
+    _form: '\Drupal\adw_user_profiles\Form\UserProfileConfigForm'
+    _title: 'UserProfileConfigForm'
+  requirements:
+    _role: 'administrator'
+  options:
+    _admin_route: TRUE
+
+adw_user_profiles.adw_affiliate_profile:
+  path: '/about/become-affiliate'
+  defaults:
+    _controller: '\Drupal\adw_user_profiles\Controller\UserProfileController::getAffiliateProfile'
+    _title: 'Profile'
+  requirements:
+    _permission: 'access content'
+
+adw_user_profiles.affiliate_redirect:
+  path: '/become-a-ccss-affiliate-now'
+  defaults:
+    _controller: '\Drupal\adw_user_profiles\Controller\UserProfileController::redirectUser'
+    _title: 'Become a CCSS Affiliate Now'
+  requirements:
+    _access: 'TRUE'

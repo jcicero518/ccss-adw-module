@@ -1,0 +1,8 @@
+name: 'Adw User Profiles'
+type: module
+description: 'Adw User Profiles'
+core: 8.x
+package: 'Custom'
+
+dependencies:
+  - profile

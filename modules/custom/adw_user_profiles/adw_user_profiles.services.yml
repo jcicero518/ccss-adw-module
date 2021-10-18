@@ -1,0 +1,4 @@
+services:
+  adw_user_profiles.affiliate_form:
+    class: Drupal\adw_user_profiles\AffiliateProfileForm
+    arguments: ['@entity.manager', '@current_user', '@entity.form_builder']
